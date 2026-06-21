@@ -12,6 +12,7 @@ For robustness it adds:
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ from pathlib import Path
 import pandas as pd
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 
 class DataLoadError(RuntimeError):
@@ -142,14 +145,16 @@ def load_data(
         try:
             cached = _read_cache(path)
             validate_data(cached, ticker)
+            logger.debug("Cache hit for %s (%s)", ticker, path)
             return cached
         except (DataLoadError, ValueError, OSError):
             # A corrupt cache should never block a fresh download.
-            pass
+            logger.debug("Ignoring unusable cache for %s", ticker)
 
     last_error: DataLoadError | None = None
     for attempt in range(1, max(1, max_retries) + 1):
         try:
+            logger.debug("Downloading %s (attempt %d/%d)", ticker, attempt, max_retries)
             df = _download_raw(ticker, period, interval)
             validate_data(df, ticker)
             if use_cache:
@@ -158,8 +163,9 @@ def load_data(
         except DataLoadError as exc:
             last_error = exc
             if attempt < max_retries:
-                # Exponential backoff: 2s, 4s, 8s, ...
-                time.sleep(retry_backoff * (2 ** (attempt - 1)))
+                wait = retry_backoff * (2 ** (attempt - 1))
+                logger.warning("Download of %s failed (%s); retrying in %.0fs", ticker, exc, wait)
+                time.sleep(wait)  # Exponential backoff: 2s, 4s, 8s, ...
 
     assert last_error is not None  # loop runs at least once
     raise last_error

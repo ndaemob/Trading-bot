@@ -104,3 +104,35 @@ PAPER_PORTFOLIO_FILE: str = "paper_portfolio.json"
 
 OUTPUT_DIR: str = "output"
 """Directory for generated charts and exports (git-ignored)."""
+
+# --------------------------------------------------------------------------- #
+# Extended indicators
+# --------------------------------------------------------------------------- #
+EMA_FAST: int = 12
+EMA_SLOW: int = 26
+BB_PERIOD: int = 20
+BB_STD: float = 2.0
+ADX_PERIOD: int = 14
+STOCH_PERIOD: int = 14
+STOCH_SMOOTH: int = 3
+VOLUME_SMA: int = 20
+
+# Trend is considered "strong" (high conviction) above this ADX level.
+ADX_TREND_STRENGTH: float = 25.0
+
+# --------------------------------------------------------------------------- #
+# Performance metrics
+# --------------------------------------------------------------------------- #
+TRADING_DAYS_PER_YEAR: int = 252
+RISK_FREE_RATE: float = 0.0
+"""Annual risk-free rate used in Sharpe/Sortino (kept simple at 0)."""
+
+# --------------------------------------------------------------------------- #
+# Multi-factor signal scoring — weights must sum to 1.0
+# --------------------------------------------------------------------------- #
+FACTOR_WEIGHTS: dict[str, float] = {
+    "trend": 0.35,
+    "momentum": 0.30,
+    "participation": 0.15,
+    "quality": 0.20,
+}

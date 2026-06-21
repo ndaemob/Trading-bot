@@ -2,11 +2,13 @@
 
 [![CI](https://github.com/ndaemob/Trading-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/ndaemob/Trading-bot/actions/workflows/ci.yml)
 
-A safe, data-driven **stock analysis** bot. It downloads historical price data,
-computes technical indicators, and produces probabilistic **signals**
-(`BUY` / `HOLD` / `WATCH` / `SELL`) with confidence scores, suggested entry
-zones, stop-losses, and risk-managed position sizes. It can also **backtest**,
-render **charts**, and run a **simulated paper-trading** account.
+A safe, data-driven **stock analysis** bot with a sleek **local web dashboard**.
+It downloads historical price data, computes technical indicators, and produces
+probabilistic **signals** (`BUY` / `HOLD` / `WATCH` / `SELL`) from a transparent
+**multi-factor model** — with confidence scores, entry zones, stop-losses, and
+risk-managed position sizes. It also **backtests** (single name *and* whole
+portfolio vs a benchmark), reports professional **risk metrics**, renders
+**charts**, and runs a **simulated paper-trading** account.
 
 > ⚠️ **This is not financial advice. No real trades are ever executed.**
 
@@ -14,12 +16,14 @@ render **charts**, and run a **simulated paper-trading** account.
 
 ## What this bot does
 
-- 📈 **Loads** up to 2 years of daily historical data from Yahoo Finance (via `yfinance`), with retries and a same-day local cache.
-- 🧮 **Computes** technical indicators: RSI, SMA (20/50/200), MACD, and ATR.
-- 🚦 **Generates** a single discrete signal per ticker with confidence (0–100), human-readable **reasons** and **risks**, latest close, suggested **entry zone** and **stop-loss**.
+- 🖥️ **Web dashboard** — a modern dark UI to analyse tickers, see signal cards with confidence rings and factor breakdowns, and run backtests (with a built-in offline **demo mode**).
+- 📈 **Loads** up to 2 years of daily history from Yahoo Finance (`yfinance`), with retries and a same-day local cache.
+- 🧮 **Computes** indicators: RSI, SMA (20/50/200), EMA, MACD, ATR, Bollinger Bands, ADX, Stochastic, OBV/volume.
+- 🚦 **Generates** signals via a transparent **multi-factor score** (trend · momentum · participation · quality) with confidence (0–100), **reasons**, **risks**, entry zone and stop-loss.
 - 🛡️ **Sizes positions** under strict risk rules: max **2%** risk per trade, max **20%** allocation per stock, and **never** leverage.
-- 🔁 **Backtests** the strategy over history (total return, # trades, win rate, max drawdown), modelling **commission** and **slippage**, with all-in or risk-based sizing.
-- 📊 **Charts** price + moving averages + RSI, and the backtest equity curve (PNG).
+- 🔁 **Backtests** a single name *or* a whole **portfolio** (risk-managed across names) vs an equal-weight **buy-and-hold benchmark**.
+- 📐 **Reports metrics**: CAGR, Sharpe, Sortino, volatility, max drawdown, profit factor, win rate.
+- 📊 **Charts** price + moving averages + RSI, and equity curves (PNG).
 - 🧪 **Paper-trades**: applies signals to a persistent, fully **simulated** portfolio (JSON-backed) — no broker, no real orders.
 
 ## What this bot does **not** do
@@ -47,23 +51,20 @@ ai-trading-bot/
 ├── src/
 │   ├── __init__.py
 │   ├── main.py           # CLI entry point
+│   ├── web.py            # Flask web dashboard + JSON API
+│   ├── web_static/       # dashboard frontend (HTML/CSS/JS)
 │   ├── data_loader.py    # yfinance download + validation + retry + cache
-│   ├── indicators.py     # RSI, SMA, MACD, ATR
-│   ├── strategy.py       # signal generation logic
+│   ├── indicators.py     # RSI, SMA, EMA, MACD, ATR, Bollinger, ADX, Stoch, OBV
+│   ├── strategy.py       # multi-factor signal generation
 │   ├── risk.py           # position sizing & risk limits
-│   ├── backtest.py       # historical backtest (fees, slippage, sizing modes)
+│   ├── backtest.py       # single-name backtest (fees, slippage, sizing modes)
+│   ├── portfolio.py      # multi-ticker portfolio backtest + benchmark
+│   ├── metrics.py        # Sharpe, Sortino, CAGR, drawdown, profit factor
 │   ├── charts.py         # matplotlib price & equity charts
 │   ├── paper_trading.py  # persistent simulated portfolio
 │   └── config.py         # tunable constants
-└── tests/
-    ├── conftest.py       # offline synthetic-data fixtures
-    ├── test_strategy.py
-    ├── test_risk.py
-    ├── test_data_loader.py
-    ├── test_indicators.py
-    ├── test_backtest.py
-    ├── test_paper_trading.py
-    └── test_charts.py
+└── tests/                # 103 offline tests (strategy, risk, metrics,
+    └── ...               #   portfolio, data loader, indicators, web, …)
 ```
 
 ---
@@ -87,6 +88,27 @@ pip install -e ".[dev]"
 ---
 
 ## How to run
+
+### 🖥️ Web dashboard (recommended)
+
+Start the local server and open the dashboard in your browser:
+
+```bash
+python -m src.web
+# or, after `pip install -e .`:
+ai-trading-bot-web --port 5000
+```
+
+Then visit **http://127.0.0.1:5000**. Enter tickers, pick a period, and click
+**Analyze** to see signal cards (confidence ring, factor breakdown, reasons,
+risks, entry/stop levels, risk-managed sizing). Each card has a **Run backtest**
+button, and **Portfolio Backtest** simulates the whole watchlist against a
+buy-and-hold benchmark.
+
+> No internet? Flip on **Demo data** to explore the full dashboard with
+> realistic synthetic prices — completely offline.
+
+### ⌨️ Command line
 
 Analyse the default tickers (`AAPL, MSFT, NVDA, TSLA, GOOGL`):
 

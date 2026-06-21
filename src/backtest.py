@@ -18,7 +18,7 @@ from typing import Literal
 
 import pandas as pd
 
-from . import config, risk, strategy
+from . import config, metrics, risk, strategy
 
 SizingMode = Literal["all_in", "risk_based"]
 
@@ -70,6 +70,11 @@ class BacktestResult:
         num_trades: Number of completed round-trip trades.
         win_rate: Fraction of trades that were profitable (0-1).
         max_drawdown: Largest peak-to-trough equity drop (0-1, positive).
+        cagr: Compound annual growth rate.
+        volatility: Annualised volatility of daily returns.
+        sharpe: Annualised Sharpe ratio.
+        sortino: Annualised Sortino ratio.
+        profit_factor: Gross profit / gross loss across trades.
         trades: The individual completed trades.
         equity_curve: Portfolio value over time.
     """
@@ -81,6 +86,11 @@ class BacktestResult:
     num_trades: int
     win_rate: float
     max_drawdown: float
+    cagr: float = 0.0
+    volatility: float = 0.0
+    sharpe: float = 0.0
+    sortino: float = 0.0
+    profit_factor: float = 0.0
     trades: list[Trade] = field(default_factory=list)
     equity_curve: pd.Series | None = None
 
@@ -252,6 +262,9 @@ def run_backtest(
     win_rate = (wins / num_trades) if num_trades else 0.0
     total_return = (final_value - initial_capital) / initial_capital
 
+    returns = metrics.daily_returns(equity_curve)
+    trade_profits = [t.profit for t in trades]
+
     return BacktestResult(
         ticker=ticker.upper() if ticker else "",
         initial_capital=float(initial_capital),
@@ -260,6 +273,11 @@ def run_backtest(
         num_trades=num_trades,
         win_rate=win_rate,
         max_drawdown=_max_drawdown(equity_curve),
+        cagr=metrics.cagr(equity_curve),
+        volatility=metrics.annualized_volatility(returns),
+        sharpe=metrics.sharpe_ratio(returns),
+        sortino=metrics.sortino_ratio(returns),
+        profit_factor=metrics.profit_factor(trade_profits),
         trades=trades,
         equity_curve=equity_curve,
     )
@@ -272,8 +290,12 @@ def format_result(result: BacktestResult) -> str:
         f"  Initial Capital: {result.initial_capital:,.2f}",
         f"  Final Value:     {result.final_value:,.2f}",
         f"  Total Return:    {result.total_return:+.2%}",
+        f"  CAGR:            {result.cagr:+.2%}",
+        f"  Sharpe / Sortino:{result.sharpe:>6.2f} / {result.sortino:.2f}",
+        f"  Volatility:      {result.volatility:.2%}",
         f"  Trades:          {result.num_trades}",
         f"  Win Rate:        {result.win_rate:.0%}",
+        f"  Profit Factor:   {result.profit_factor:.2f}",
         f"  Max Drawdown:    {result.max_drawdown:.2%}",
     ]
     return "\n".join(lines)

@@ -4,6 +4,12 @@ Turns indicator values into a single discrete recommendation
 (``BUY`` / ``HOLD`` / ``WATCH`` / ``SELL``) together with a confidence score,
 human-readable reasons, risks, and suggested entry / stop levels.
 
+The discrete label comes from a tiny, auditable rule (:func:`classify`). The
+*confidence* behind it comes from a transparent **multi-factor model** that
+blends trend, momentum, participation (volume) and quality (over-extension)
+into a single directional score — every factor is exposed on the resulting
+:class:`Signal` so the reasoning is fully inspectable.
+
 The recommendations are *probabilistic and educational*. They are not financial
 advice and the bot never executes a trade.
 """
@@ -38,6 +44,8 @@ class Signal:
         risks: Bullet-point caveats the user should keep in mind.
         stop_loss: Suggested protective stop-loss price (``None`` if N/A).
         entry_zone: ``(low, high)`` suggested accumulation band (``None`` if N/A).
+        score: Directional multi-factor score in ``[-1, 1]`` (bullish positive).
+        factors: Per-factor sub-scores in ``[-1, 1]`` (the score's breakdown).
     """
 
     ticker: str
@@ -48,6 +56,8 @@ class Signal:
     risks: list[str] = field(default_factory=list)
     stop_loss: float | None = None
     entry_zone: tuple[float, float] | None = None
+    score: float = 0.0
+    factors: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.signal not in VALID_SIGNALS:
@@ -93,37 +103,122 @@ def classify(sma50: float, sma200: float, rsi: float) -> str:
     return HOLD
 
 
-def _confidence(signal: str, sma50: float, sma200: float, rsi: float, macd_hist: float) -> int:
-    """Heuristic 0-100 confidence score for a signal.
+def _clamp(x: float, lo: float = -1.0, hi: float = 1.0) -> float:
+    """Clamp ``x`` to ``[lo, hi]`` (NaN becomes 0.0)."""
+    if math.isnan(x):
+        return 0.0
+    return max(lo, min(hi, x))
 
-    Combines trend separation (how far SMA50 is above/below SMA200), how
-    comfortably RSI sits in its ideal band, and MACD momentum. The result is
-    intentionally bounded and never expresses certainty.
+
+def _val(values: dict[str, float], key: str) -> float:
+    """Read ``key`` from a values dict, defaulting to NaN when absent."""
+    v = values.get(key, float("nan"))
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def factor_scores(values: dict[str, float]) -> dict[str, float]:
+    """Compute four bullish-positive factor scores in ``[-1, 1]``.
+
+    Factors (each ``-1`` very bearish … ``+1`` very bullish):
+
+    * ``trend`` — SMA50 vs SMA200 and SMA20 vs SMA50, amplified by ADX strength.
+    * ``momentum`` — MACD histogram (scaled by ATR), RSI and Stochastic.
+    * ``participation`` — volume vs its average, signed by momentum direction.
+    * ``quality`` — penalises over-extension (high RSI/Stochastic, price above
+      the upper Bollinger band); higher means "more room to run".
+
+    Missing indicators degrade gracefully to a neutral ``0.0`` contribution.
     """
-    # Trend strength as a percentage gap between the moving averages.
-    trend_gap = 0.0
-    if sma200 and not math.isnan(sma200):
-        trend_gap = (sma50 - sma200) / sma200
+    sma20 = _val(values, "SMA_20")
+    sma50 = _val(values, "SMA_50")
+    sma200 = _val(values, "SMA_200")
+    rsi = _val(values, "RSI")
+    macd_hist = _val(values, "MACD_Hist")
+    atr = _val(values, "ATR")
+    close = _val(values, "Close")
+    adx = _val(values, "ADX")
+    stoch_k = _val(values, "Stoch_K")
+    bb_pct = _val(values, "BB_Pct")
+    volume = _val(values, "Volume")
+    vol_sma = _val(values, "Vol_SMA_20")
 
-    # Scale a ~10% gap to a full strength contribution.
-    trend_strength = max(-1.0, min(1.0, trend_gap / 0.10))
-    momentum = 1.0 if (not math.isnan(macd_hist) and macd_hist > 0) else -1.0
+    # --- trend -------------------------------------------------------------
+    long_trend = 0.0
+    if not math.isnan(sma50) and not math.isnan(sma200) and sma200 != 0:
+        long_trend = _clamp(((sma50 - sma200) / sma200) / 0.08)
+    med_trend = 0.0
+    if not math.isnan(sma20) and not math.isnan(sma50) and sma50 != 0:
+        med_trend = _clamp(((sma20 - sma50) / sma50) / 0.05)
+    raw_trend = 0.6 * long_trend + 0.4 * med_trend
+    adx_mult = 1.0
+    if not math.isnan(adx):
+        adx_mult = _clamp(adx / config.ADX_TREND_STRENGTH, 0.5, 1.2)
+    trend = _clamp(raw_trend * adx_mult)
 
+    # --- momentum ----------------------------------------------------------
+    parts: list[float] = []
+    if not math.isnan(macd_hist):
+        scale = (0.5 * atr) if (not math.isnan(atr) and atr > 0) else max(close, 1.0) * 0.01
+        parts.append(_clamp(macd_hist / scale))
+    if not math.isnan(rsi):
+        parts.append(_clamp((rsi - 50) / 15) if rsi <= 65 else _clamp((65 - rsi) / 15))
+    if not math.isnan(stoch_k):
+        parts.append(_clamp((stoch_k - 50) / 40))
+    momentum = _clamp(sum(parts) / len(parts)) if parts else 0.0
+
+    # --- participation (volume confirms direction) -------------------------
+    participation = 0.0
+    if not math.isnan(volume) and not math.isnan(vol_sma) and vol_sma > 0:
+        vol_ratio = _clamp(volume / vol_sma - 1.0)
+        direction = 1.0 if momentum >= 0 else -1.0
+        participation = _clamp(vol_ratio * direction)
+
+    # --- quality (lower when over-extended) --------------------------------
+    if all(math.isnan(x) for x in (rsi, stoch_k, bb_pct)):
+        quality = 0.0  # nothing to assess -> neutral
+    else:
+        quality = 0.3  # baseline: "not over-extended"
+        if not math.isnan(rsi):
+            quality -= 1.2 * max(0.0, (rsi - 70) / 30)
+        if not math.isnan(stoch_k):
+            quality -= 0.6 * max(0.0, (stoch_k - 80) / 20)
+        if not math.isnan(bb_pct):
+            quality -= 0.8 * max(0.0, bb_pct - 1.0)
+        quality = _clamp(quality)
+
+    return {
+        "trend": round(trend, 3),
+        "momentum": round(momentum, 3),
+        "participation": round(participation, 3),
+        "quality": round(quality, 3),
+    }
+
+
+def directional_score(factors: dict[str, float]) -> float:
+    """Weighted blend of factor scores into one directional score in ``[-1, 1]``."""
+    score = sum(config.FACTOR_WEIGHTS.get(name, 0.0) * value for name, value in factors.items())
+    return _clamp(score)
+
+
+def _confidence(signal: str, score: float) -> int:
+    """Map the directional ``score`` to a 0-100 confidence for the given signal.
+
+    Confidence rises as the multi-factor score aligns with the signal's
+    direction (bullish for BUY/WATCH, bearish for SELL). It never expresses
+    certainty.
+    """
     if signal == BUY:
-        # Reward a healthy uptrend and an RSI near the middle of the band.
-        rsi_center = 1.0 - abs(rsi - 55.0) / 15.0  # 1.0 at RSI 55, 0 at 40/70
-        score = 50 + 25 * trend_strength + 15 * max(0.0, rsi_center) + 10 * momentum
+        raw = 50 + 50 * score
     elif signal == WATCH:
-        # Positive trend but stretched: moderate conviction, capped.
-        score = 45 + 20 * trend_strength + 5 * momentum
+        raw = 45 + 35 * score
     elif signal == SELL:
-        # Stronger conviction the deeper the downtrend / the higher the RSI.
-        overbought = max(0.0, (rsi - config.RSI_BUY_HIGH) / 30.0)
-        score = 50 + 25 * (-trend_strength) + 20 * overbought - 5 * momentum
-    else:  # HOLD
-        score = 40
-
-    return int(max(0, min(100, round(score))))
+        raw = 50 + 50 * (-score)
+    else:  # HOLD — conviction is low precisely because the picture is mixed.
+        raw = 45 - 25 * abs(score)
+    return int(max(0, min(100, round(raw))))
 
 
 def _levels(close: float, atr: float) -> tuple[float | None, tuple[float, float] | None]:
@@ -145,13 +240,19 @@ def _levels(close: float, atr: float) -> tuple[float | None, tuple[float, float]
     return stop_loss, (entry_low, entry_high)
 
 
+def _row_values(df: pd.DataFrame) -> dict[str, float]:
+    """Extract the latest row of ``df`` as a plain ``{column: float}`` dict."""
+    last = df.iloc[-1]
+    return {col: _val({col: last[col]}, col) for col in df.columns}
+
+
 def generate_signal(df: pd.DataFrame, ticker: str) -> Signal:
     """Produce a :class:`Signal` from a DataFrame of indicators.
 
     Args:
         df: DataFrame already processed by
             :func:`indicators.add_indicators`. Must contain ``Close``,
-            ``SMA_50``, ``SMA_200``, ``RSI`` and (ideally) ``ATR``.
+            ``SMA_50``, ``SMA_200``, ``RSI`` and (ideally) the extended set.
         ticker: Symbol being analysed (echoed back in the result).
 
     Returns:
@@ -168,19 +269,19 @@ def generate_signal(df: pd.DataFrame, ticker: str) -> Signal:
     if missing:
         raise ValueError(f"Missing indicator columns: {sorted(missing)}")
 
-    last = df.iloc[-1]
-    close = float(last["Close"])
-    sma50 = float(last["SMA_50"])
-    sma200 = float(last["SMA_200"])
-    rsi = float(last["RSI"])
-    atr = float(last["ATR"]) if "ATR" in df.columns else float("nan")
-    macd_hist = float(last["MACD_Hist"]) if "MACD_Hist" in df.columns else float("nan")
+    values = _row_values(df)
+    close = _val(values, "Close")
+    sma50 = _val(values, "SMA_50")
+    sma200 = _val(values, "SMA_200")
+    rsi = _val(values, "RSI")
+    atr = _val(values, "ATR")
 
     signal = classify(sma50, sma200, rsi)
-    confidence = _confidence(signal, sma50, sma200, rsi, macd_hist)
+    factors = factor_scores(values)
+    score = directional_score(factors)
+    confidence = _confidence(signal, score)
     stop_loss, entry_zone = _levels(close, atr)
-
-    reasons, risks = _explain(signal, sma50, sma200, rsi, macd_hist)
+    reasons, risks = _explain(signal, values)
 
     # SELL is an exit signal — entry levels would be misleading, so drop them.
     if signal == SELL:
@@ -195,21 +296,38 @@ def generate_signal(df: pd.DataFrame, ticker: str) -> Signal:
         risks=risks,
         stop_loss=stop_loss,
         entry_zone=entry_zone,
+        score=round(score, 3),
+        factors=factors,
     )
 
 
-def _explain(
-    signal: str, sma50: float, sma200: float, rsi: float, macd_hist: float
-) -> tuple[list[str], list[str]]:
-    """Build human-readable ``(reasons, risks)`` lists for a signal."""
+def _explain(signal: str, values: dict[str, float]) -> tuple[list[str], list[str]]:
+    """Build human-readable ``(reasons, risks)`` lists from indicator values."""
     reasons: list[str] = []
     risks: list[str] = []
 
-    trend_up = not math.isnan(sma50) and not math.isnan(sma200) and sma50 > sma200
-    if trend_up:
-        reasons.append("SMA50 above SMA200 (long-term uptrend)")
-    elif not math.isnan(sma50) and not math.isnan(sma200):
-        reasons.append("SMA50 below SMA200 (long-term downtrend)")
+    sma50 = _val(values, "SMA_50")
+    sma200 = _val(values, "SMA_200")
+    rsi = _val(values, "RSI")
+    macd_hist = _val(values, "MACD_Hist")
+    adx = _val(values, "ADX")
+    stoch_k = _val(values, "Stoch_K")
+    bb_pct = _val(values, "BB_Pct")
+    volume = _val(values, "Volume")
+    vol_sma = _val(values, "Vol_SMA_20")
+
+    if not math.isnan(sma50) and not math.isnan(sma200):
+        if sma50 > sma200:
+            reasons.append("SMA50 above SMA200 (long-term uptrend)")
+        else:
+            reasons.append("SMA50 below SMA200 (long-term downtrend)")
+
+    if not math.isnan(adx):
+        if adx >= config.ADX_TREND_STRENGTH:
+            reasons.append(f"Strong trend (ADX {adx:.0f})")
+        else:
+            reasons.append(f"Weak or ranging trend (ADX {adx:.0f})")
+            risks.append("Trend strength is low; signals less reliable in chop")
 
     if not math.isnan(rsi):
         if rsi > config.RSI_OVERBOUGHT:
@@ -230,6 +348,24 @@ def _explain(
         else:
             reasons.append("MACD histogram negative (downward momentum)")
             risks.append("MACD momentum is fading or negative")
+
+    if not math.isnan(stoch_k):
+        if stoch_k > 80:
+            risks.append(f"Stochastic overbought ({stoch_k:.0f})")
+        elif stoch_k < 20:
+            reasons.append(f"Stochastic oversold ({stoch_k:.0f}); possible bounce")
+
+    if not math.isnan(bb_pct):
+        if bb_pct > 1.0:
+            risks.append("Price above upper Bollinger band (stretched)")
+        elif bb_pct < 0.0:
+            reasons.append("Price below lower Bollinger band (oversold)")
+
+    if not math.isnan(volume) and not math.isnan(vol_sma) and vol_sma > 0:
+        if volume > 1.2 * vol_sma:
+            reasons.append("Above-average volume confirms the move")
+        elif volume < 0.8 * vol_sma:
+            risks.append("Below-average volume; weak conviction in the move")
 
     if signal == SELL:
         risks.append("Signal favours exiting or avoiding new long exposure")

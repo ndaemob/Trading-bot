@@ -1,7 +1,9 @@
 """Technical-indicator calculations.
 
-Wraps the :mod:`ta` library to enrich an OHLCV DataFrame with the handful of
-indicators the strategy needs: RSI, three SMAs, MACD and ATR.
+Wraps the :mod:`ta` library to enrich an OHLCV DataFrame with the indicators
+the strategy needs: RSI, three SMAs, two EMAs, MACD, ATR, Bollinger Bands,
+ADX (trend strength), the Stochastic oscillator and volume confirmation (OBV
+and a volume SMA).
 
 The functions here are pure: they take a DataFrame and return a new DataFrame,
 never mutating their input and never touching the network.
@@ -21,9 +23,14 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     * ``RSI`` — Relative Strength Index (default 14-period).
     * ``SMA_20`` / ``SMA_50`` / ``SMA_200`` — Simple Moving Averages.
+    * ``EMA_12`` / ``EMA_26`` — Exponential Moving Averages.
     * ``MACD`` / ``MACD_Signal`` / ``MACD_Hist`` — Moving Average
       Convergence Divergence and its signal line / histogram.
     * ``ATR`` — Average True Range (volatility, used for stops/entries).
+    * ``BB_High`` / ``BB_Low`` / ``BB_Mid`` / ``BB_Pct`` — Bollinger Bands.
+    * ``ADX`` / ``ADX_Pos`` / ``ADX_Neg`` — trend strength & direction.
+    * ``Stoch_K`` / ``Stoch_D`` — Stochastic oscillator.
+    * ``OBV`` / ``Vol_SMA_20`` — volume confirmation (when Volume present).
 
     Args:
         df: OHLCV DataFrame with at least ``High``, ``Low`` and ``Close``.
@@ -43,9 +50,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"Missing required columns for indicators: {sorted(missing)}")
 
     # Imported lazily so unit tests can patch/skip if 'ta' is unavailable.
-    from ta.momentum import RSIIndicator
-    from ta.trend import MACD, SMAIndicator
-    from ta.volatility import AverageTrueRange
+    from ta.momentum import RSIIndicator, StochasticOscillator
+    from ta.trend import ADXIndicator, EMAIndicator, MACD, SMAIndicator
+    from ta.volatility import AverageTrueRange, BollingerBands
 
     out = df.copy()
 
@@ -60,6 +67,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["SMA_50"] = SMAIndicator(close=close, window=config.SMA_MEDIUM).sma_indicator()
     out["SMA_200"] = SMAIndicator(close=close, window=config.SMA_LONG).sma_indicator()
 
+    out["EMA_12"] = EMAIndicator(close=close, window=config.EMA_FAST).ema_indicator()
+    out["EMA_26"] = EMAIndicator(close=close, window=config.EMA_SLOW).ema_indicator()
+
     macd = MACD(
         close=close,
         window_fast=config.MACD_FAST,
@@ -73,6 +83,38 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["ATR"] = AverageTrueRange(
         high=high, low=low, close=close, window=config.ATR_PERIOD
     ).average_true_range()
+
+    # Bollinger Bands — volatility envelope around a 20-period mean.
+    bb = BollingerBands(close=close, window=config.BB_PERIOD, window_dev=config.BB_STD)
+    out["BB_High"] = bb.bollinger_hband()
+    out["BB_Low"] = bb.bollinger_lband()
+    out["BB_Mid"] = bb.bollinger_mavg()
+    out["BB_Pct"] = bb.bollinger_pband()  # 0 at lower band, 1 at upper band
+
+    # ADX — trend *strength* (direction-agnostic) plus directional components.
+    adx = ADXIndicator(high=high, low=low, close=close, window=config.ADX_PERIOD)
+    out["ADX"] = adx.adx()
+    out["ADX_Pos"] = adx.adx_pos()
+    out["ADX_Neg"] = adx.adx_neg()
+
+    # Stochastic oscillator — momentum relative to the recent range.
+    stoch = StochasticOscillator(
+        high=high,
+        low=low,
+        close=close,
+        window=config.STOCH_PERIOD,
+        smooth_window=config.STOCH_SMOOTH,
+    )
+    out["Stoch_K"] = stoch.stoch()
+    out["Stoch_D"] = stoch.stoch_signal()
+
+    # Volume confirmation (only when a Volume column is available).
+    if "Volume" in out.columns:
+        from ta.volume import OnBalanceVolumeIndicator
+
+        volume = out["Volume"].astype("float64").squeeze()
+        out["OBV"] = OnBalanceVolumeIndicator(close=close, volume=volume).on_balance_volume()
+        out["Vol_SMA_20"] = SMAIndicator(close=volume, window=config.VOLUME_SMA).sma_indicator()
 
     return out
 

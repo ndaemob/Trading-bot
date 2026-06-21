@@ -81,6 +81,22 @@ def test_signal_has_reasons_and_risks(uptrend_df):
     assert any("probabilistic" in r.lower() for r in sig.risks)
 
 
+def test_signal_has_bounded_factor_breakdown(uptrend_df, downtrend_df, choppy_df):
+    """Every signal exposes the four factors and a score, all in [-1, 1]."""
+    for df in (uptrend_df, downtrend_df, choppy_df):
+        sig = generate_signal(df, "TEST")
+        assert set(sig.factors) >= {"trend", "momentum", "participation", "quality"}
+        for value in sig.factors.values():
+            assert -1.0 <= value <= 1.0
+        assert -1.0 <= sig.score <= 1.0
+
+
+def test_factor_scores_neutral_on_empty_values():
+    """With no indicator values, all factors are a neutral 0.0."""
+    factors = strategy.factor_scores({})
+    assert factors == {"trend": 0.0, "momentum": 0.0, "participation": 0.0, "quality": 0.0}
+
+
 def test_uptrend_is_not_sell(uptrend_df):
     """A clean uptrend should never be classified as SELL."""
     sig = generate_signal(uptrend_df, "TEST")

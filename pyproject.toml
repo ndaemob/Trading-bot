@@ -15,6 +15,7 @@ dependencies = [
     "yfinance>=0.2.40",
     "ta>=0.11.0",
     "matplotlib>=3.7",
+    "flask>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -27,9 +28,13 @@ dev = [
 
 [project.scripts]
 ai-trading-bot = "src.main:main"
+ai-trading-bot-web = "src.web:main"
 
 [tool.setuptools]
 packages = ["src"]
+
+[tool.setuptools.package-data]
+src = ["web_static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
