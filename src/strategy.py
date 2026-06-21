@@ -51,9 +51,7 @@ class Signal:
 
     def __post_init__(self) -> None:
         if self.signal not in VALID_SIGNALS:
-            raise ValueError(
-                f"Invalid signal {self.signal!r}; expected one of {VALID_SIGNALS}."
-            )
+            raise ValueError(f"Invalid signal {self.signal!r}; expected one of {VALID_SIGNALS}.")
         # Confidence is always clamped to the documented 0-100 range.
         self.confidence = int(max(0, min(100, self.confidence)))
 
@@ -95,8 +93,7 @@ def classify(sma50: float, sma200: float, rsi: float) -> str:
     return HOLD
 
 
-def _confidence(signal: str, sma50: float, sma200: float, rsi: float,
-                macd_hist: float) -> int:
+def _confidence(signal: str, sma50: float, sma200: float, rsi: float, macd_hist: float) -> int:
     """Heuristic 0-100 confidence score for a signal.
 
     Combines trend separation (how far SMA50 is above/below SMA200), how
@@ -201,8 +198,9 @@ def generate_signal(df: pd.DataFrame, ticker: str) -> Signal:
     )
 
 
-def _explain(signal: str, sma50: float, sma200: float, rsi: float,
-             macd_hist: float) -> tuple[list[str], list[str]]:
+def _explain(
+    signal: str, sma50: float, sma200: float, rsi: float, macd_hist: float
+) -> tuple[list[str], list[str]]:
     """Build human-readable ``(reasons, risks)`` lists for a signal."""
     reasons: list[str] = []
     risks: list[str] = []

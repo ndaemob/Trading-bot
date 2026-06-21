@@ -31,6 +31,9 @@ secrets.*
 data_cache/
 output/
 
+# Simulated paper-trading state (runtime, not source)
+paper_portfolio.json
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

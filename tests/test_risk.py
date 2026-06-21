@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src import config, risk
+from src import config
 from src.risk import calculate_position_size, check_allocation
 
 
@@ -84,9 +84,9 @@ def test_shares_are_whole_and_non_negative():
 @pytest.mark.parametrize(
     "portfolio,entry,stop",
     [
-        (0, 100, 95),       # non-positive portfolio
-        (10_000, 0, 95),    # non-positive entry
-        (10_000, 100, 0),   # non-positive stop
+        (0, 100, 95),  # non-positive portfolio
+        (10_000, 0, 95),  # non-positive entry
+        (10_000, 100, 0),  # non-positive stop
         (10_000, 100, 105),  # stop above entry (would be negative risk)
         (10_000, 100, 100),  # stop equal to entry (zero risk -> div by zero)
     ],

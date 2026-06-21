@@ -71,3 +71,36 @@ MAX_ALLOCATION_PER_STOCK: float = 0.20
 
 # Leverage is intentionally disabled and is never recommended by this bot.
 ALLOW_LEVERAGE: bool = False
+
+# --------------------------------------------------------------------------- #
+# Backtest realism — costs applied to simulated fills
+# --------------------------------------------------------------------------- #
+COMMISSION_PCT: float = 0.0005
+"""Commission charged per trade as a fraction of notional (0.05%)."""
+
+SLIPPAGE_PCT: float = 0.0005
+"""Adverse slippage applied to each simulated fill (0.05%)."""
+
+# --------------------------------------------------------------------------- #
+# Data loading robustness
+# --------------------------------------------------------------------------- #
+USE_CACHE: bool = True
+"""Reuse a same-day local cache instead of re-downloading when possible."""
+
+CACHE_DIR: str = "data_cache"
+"""Directory for cached CSV downloads (git-ignored)."""
+
+MAX_RETRIES: int = 3
+"""How many times to attempt a download before giving up."""
+
+RETRY_BACKOFF: float = 2.0
+"""Base seconds for exponential backoff between download retries."""
+
+# --------------------------------------------------------------------------- #
+# Paper trading & output
+# --------------------------------------------------------------------------- #
+PAPER_PORTFOLIO_FILE: str = "paper_portfolio.json"
+"""Default JSON file persisting the simulated paper-trading portfolio."""
+
+OUTPUT_DIR: str = "output"
+"""Directory for generated charts and exports (git-ignored)."""

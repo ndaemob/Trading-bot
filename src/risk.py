@@ -68,13 +68,10 @@ def check_allocation(
     allocation = position_value / portfolio_value
     if allocation > max_allocation + 1e-9:
         warnings.append(
-            f"Allocation {allocation:.1%} exceeds the "
-            f"{max_allocation:.0%} per-stock limit."
+            f"Allocation {allocation:.1%} exceeds the " f"{max_allocation:.0%} per-stock limit."
         )
     if position_value > portfolio_value + 1e-9:
-        warnings.append(
-            "Position value exceeds available capital — leverage is not allowed."
-        )
+        warnings.append("Position value exceeds available capital — leverage is not allowed.")
     return warnings
 
 
@@ -136,8 +133,7 @@ def calculate_position_size(
 
     if shares_by_allocation < shares_by_risk:
         warnings.append(
-            f"Risk-based size reduced to respect the {max_allocation:.0%} "
-            f"allocation cap."
+            f"Risk-based size reduced to respect the {max_allocation:.0%} " f"allocation cap."
         )
     if shares == 0:
         warnings.append(

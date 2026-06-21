@@ -65,3 +65,17 @@ def choppy_df() -> pd.DataFrame:
     x = np.arange(300)
     close = 100 + 10 * np.sin(x / 10.0)
     return indicators.add_indicators(make_ohlcv(close))
+
+
+@pytest.fixture
+def trade_df() -> pd.DataFrame:
+    """A 400-bar rise-then-fall series that triggers a full buy→sell round-trip.
+
+    The long rise establishes SMA50 > SMA200 with a healthy RSI (→ BUY); the
+    later decline flips SMA50 below SMA200 (→ SELL), so a backtest records at
+    least one completed trade.
+    """
+    rise = np.linspace(50, 160, 300) + 6 * np.sin(np.arange(300) / 7.0)
+    fall = np.linspace(160, 90, 100) + 6 * np.sin(np.arange(300, 400) / 7.0)
+    close = np.concatenate([rise, fall])
+    return indicators.add_indicators(make_ohlcv(close))

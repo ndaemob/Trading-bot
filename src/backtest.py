@@ -1,9 +1,10 @@
 """A simple, long-only historical backtester.
 
 Replays the strategy across historical data to give a rough sense of how it
-*would have* behaved. This is a teaching/MVP backtester: it is all-in,
-long-only, ignores fees, slippage and dividends, and assumes fills at the
-day's closing price.
+*would have* behaved. This is a teaching/MVP backtester: it is long-only and
+assumes fills at the day's close, but it now models **commission** and
+**slippage** and can size positions either all-in or via the project's
+risk rules.
 
 **Past performance does not guarantee future results.** Nothing here executes
 a real trade.
@@ -11,33 +12,50 @@ a real trade.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from typing import Literal
 
 import pandas as pd
 
-from . import config, strategy
+from . import config, risk, strategy
+
+SizingMode = Literal["all_in", "risk_based"]
 
 
 @dataclass
 class Trade:
-    """A single completed round-trip (buy then sell)."""
+    """A single completed round-trip (buy then sell), net of costs.
+
+    ``entry_cost`` is the cash paid to open (including commission/slippage) and
+    ``exit_proceeds`` is the cash received to close (net of commission/slippage),
+    so profit and return are reported *after* trading costs.
+    """
 
     entry_date: object
     entry_price: float
     exit_date: object
     exit_price: float
+    shares: float
+    entry_cost: float
+    exit_proceeds: float
+
+    @property
+    def profit(self) -> float:
+        """Net cash profit of the trade after costs."""
+        return self.exit_proceeds - self.entry_cost
 
     @property
     def return_pct(self) -> float:
-        """Fractional return of the trade (e.g. ``0.10`` for +10%)."""
-        if self.entry_price <= 0:
+        """Fractional return on capital deployed (e.g. ``0.10`` for +10%)."""
+        if self.entry_cost <= 0:
             return 0.0
-        return (self.exit_price - self.entry_price) / self.entry_price
+        return self.profit / self.entry_cost
 
     @property
     def is_win(self) -> bool:
-        """``True`` if the trade closed at a profit."""
-        return self.exit_price > self.entry_price
+        """``True`` if the trade closed at a net profit."""
+        return self.profit > 0
 
 
 @dataclass
@@ -85,24 +103,76 @@ def _max_drawdown(equity: pd.Series) -> float:
     return float(abs(worst)) if worst < 0 else 0.0
 
 
+def _stop_for_entry(fill_price: float, atr: float) -> float:
+    """Derive a stop-loss for risk-based sizing from ATR, with a safe fallback.
+
+    Uses an ATR-based stop when ATR is sensible, otherwise an 8% stop. The
+    result is always strictly between 0 and ``fill_price``.
+    """
+    stop = fill_price - config.STOP_LOSS_ATR * atr
+    if math.isnan(atr) or not (0.0 < stop < fill_price):
+        stop = fill_price * 0.92
+    return stop
+
+
+def _shares_to_buy(
+    cash: float,
+    fill_price: float,
+    atr: float,
+    sizing: SizingMode,
+    commission_pct: float,
+    risk_per_trade: float,
+    max_allocation: float,
+) -> float:
+    """Decide how many shares to buy under the chosen sizing mode."""
+    if sizing == "risk_based":
+        try:
+            sized = risk.calculate_position_size(
+                portfolio_value=cash,
+                entry_price=fill_price,
+                stop_loss=_stop_for_entry(fill_price, atr),
+                max_risk_per_trade=risk_per_trade,
+                max_allocation=max_allocation,
+            )
+        except ValueError:
+            return 0.0
+        return float(sized.shares)
+    # All-in: spend all cash, leaving room for commission.
+    return cash / (fill_price * (1 + commission_pct))
+
+
 def run_backtest(
     df: pd.DataFrame,
     ticker: str = "",
     initial_capital: float = config.DEFAULT_PORTFOLIO_VALUE,
+    *,
+    commission_pct: float = 0.0,
+    slippage_pct: float = 0.0,
+    position_sizing: SizingMode = "all_in",
+    risk_per_trade: float = config.MAX_RISK_PER_TRADE,
+    max_allocation: float = config.MAX_ALLOCATION_PER_STOCK,
 ) -> BacktestResult:
     """Run the strategy over ``df`` and report performance.
 
     Trading rules:
 
-    * Go all-in (long) on a ``BUY`` signal when flat.
+    * Buy on a ``BUY`` signal when flat (size per ``position_sizing``).
     * Liquidate fully on a ``SELL`` signal when in a position.
     * ``HOLD`` / ``WATCH`` do nothing.
     * Any open position is marked-to-market at the final close.
+
+    Costs: each fill is moved adversely by ``slippage_pct`` and charged
+    ``commission_pct`` of notional.
 
     Args:
         df: DataFrame processed by :func:`indicators.add_indicators`.
         ticker: Optional symbol for reporting.
         initial_capital: Starting capital (default 10,000).
+        commission_pct: Commission per trade as a fraction of notional.
+        slippage_pct: Adverse slippage applied to each fill.
+        position_sizing: ``"all_in"`` or ``"risk_based"``.
+        risk_per_trade: Risk budget per trade when sizing by risk.
+        max_allocation: Allocation cap per trade when sizing by risk.
 
     Returns:
         A :class:`BacktestResult` summarising the run.
@@ -116,10 +186,12 @@ def run_backtest(
         raise ValueError("Backtest requires a 'Close' column.")
 
     signals = strategy.signal_series(df)
+    has_atr = "ATR" in df.columns
 
     cash: float = float(initial_capital)
     shares: float = 0.0
     entry_price: float = 0.0
+    entry_cost: float = 0.0
     entry_date: object = None
 
     trades: list[Trade] = []
@@ -130,22 +202,44 @@ def run_backtest(
         signal = signals.loc[date]
 
         if signal == strategy.BUY and shares == 0 and price > 0:
-            shares = cash / price  # fractional shares keep the MVP simple
-            cash = 0.0
-            entry_price = price
-            entry_date = date
+            fill = price * (1 + slippage_pct)
+            atr = float(row["ATR"]) if has_atr else float("nan")
+            qty = _shares_to_buy(
+                cash,
+                fill,
+                atr,
+                position_sizing,
+                commission_pct,
+                risk_per_trade,
+                max_allocation,
+            )
+            cost = qty * fill
+            total = cost + cost * commission_pct
+            if qty > 0 and total <= cash + 1e-9:
+                cash -= total
+                shares = qty
+                entry_price = fill
+                entry_cost = total
+                entry_date = date
         elif signal == strategy.SELL and shares > 0:
-            cash = shares * price
+            fill = price * (1 - slippage_pct)
+            proceeds = shares * fill
+            net = proceeds - proceeds * commission_pct
+            cash += net
             trades.append(
                 Trade(
                     entry_date=entry_date,
                     entry_price=entry_price,
                     exit_date=date,
-                    exit_price=price,
+                    exit_price=fill,
+                    shares=shares,
+                    entry_cost=entry_cost,
+                    exit_proceeds=net,
                 )
             )
             shares = 0.0
             entry_price = 0.0
+            entry_cost = 0.0
             entry_date = None
 
         equity_points.append(cash + shares * price)
