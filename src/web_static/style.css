@@ -221,6 +221,13 @@ body {
 .bt-metrics { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
 .bt-metrics b { color: var(--text); font-variant-numeric: tabular-nums; }
 
+.price-chart-wrap { margin: 14px 0 2px; }
+.price-chart { height: 76px; }
+.sma20-path { fill: none; stroke: var(--watch); stroke-width: 1.3; opacity: 0.85; }
+.sma50-path { fill: none; stroke: var(--accent-2); stroke-width: 1.3; opacity: 0.85; }
+.mini-legend { display: flex; gap: 14px; margin-top: 6px; font-size: 10.5px; color: var(--muted); }
+.mini-legend i { display: inline-block; width: 9px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
 .chart { width: 100%; height: 90px; display: block; }
 .spark-path { fill: none; stroke: var(--accent); stroke-width: 2; }
 .spark-area { fill: url(#sparkfill); opacity: 0.5; }

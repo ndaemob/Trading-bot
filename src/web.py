@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,34 @@ def _curve(series: pd.Series | None, max_points: int = 220) -> list[dict[str, An
     return [{"t": idx.strftime("%Y-%m-%d"), "v": round(float(v), 2)} for idx, v in sampled.items()]
 
 
+def _num_or_none(value: Any) -> float | None:
+    """Coerce a value to a rounded float, or ``None`` when missing/NaN."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else round(f, 2)
+
+
+def _price_history(df: pd.DataFrame, max_points: int = 140) -> list[dict[str, Any]]:
+    """Down-sample close + SMA20/SMA50 for the per-card mini price chart."""
+    if df is None or len(df) == 0:
+        return []
+    step = max(1, len(df) // max_points)
+    sampled = df.iloc[::step]
+    out: list[dict[str, Any]] = []
+    for idx, row in sampled.iterrows():
+        out.append(
+            {
+                "t": idx.strftime("%Y-%m-%d"),
+                "c": _num_or_none(row.get("Close")),
+                "s20": _num_or_none(row.get("SMA_20")),
+                "s50": _num_or_none(row.get("SMA_50")),
+            }
+        )
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Narrative + payload builders
 # --------------------------------------------------------------------------- #
@@ -198,6 +227,7 @@ def _analyze_one(ticker: str, period: str, portfolio_value: float, demo: bool) -
     except (data_loader.DataLoadError, ValueError) as exc:
         return {"ticker": ticker.upper(), "ok": False, "error": str(exc)}
     payload = _signal_payload(sig, portfolio_value)
+    payload["history"] = _price_history(df)
     payload["ok"] = True
     return payload
 

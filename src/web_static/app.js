@@ -104,6 +104,7 @@ function renderCard(r) {
       <div><div class="ticker">${escapeHtml(r.ticker)}</div><div class="price">Close ${num(r.latest_close)}</div></div>
       <span class="badge ${r.signal}">${r.signal}</span>
     </div>
+    ${priceChart(r.history)}
     <div class="gauge-row">${ring(r.confidence, r.signal)}<p class="narrative">${escapeHtml(r.narrative)}</p></div>
     ${factorBars(r.factors)}
     ${lists(r.reasons, r.risks)}
@@ -141,6 +142,38 @@ function sparkline(points) {
       <stop offset="0%" stop-color="#4f8cff" stop-opacity="0.35"/>
       <stop offset="100%" stop-color="#4f8cff" stop-opacity="0"/></linearGradient></defs>
     <path class="spark-area" d="${area}"/><path class="spark-path" d="${line}"/></svg>`;
+}
+
+function priceChart(history) {
+  if (!history || history.length < 2) return "";
+  const W = 320, H = 76, pad = 4, n = history.length;
+  const closes = history.map((p) => p.c).filter((v) => v != null);
+  const s20 = history.map((p) => p.s20);
+  const s50 = history.map((p) => p.s50);
+  const all = closes.concat(s20.filter((v) => v != null), s50.filter((v) => v != null));
+  if (!all.length) return "";
+  const s = scale(all, W, H, pad);
+  const line = (arr) => {
+    let d = "", started = false;
+    arr.forEach((v, i) => {
+      if (v == null) return;
+      d += (started ? "L" : "M") + s.x(i, n).toFixed(1) + "," + s.y(v).toFixed(1) + " ";
+      started = true;
+    });
+    return d.trim();
+  };
+  return `<div class="price-chart-wrap">
+    <svg class="chart price-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path class="sma50-path" d="${line(s50)}"/>
+      <path class="sma20-path" d="${line(s20)}"/>
+      <path class="spark-path" d="${line(history.map((p) => p.c))}"/>
+    </svg>
+    <div class="mini-legend">
+      <span><i style="background:#4f8cff"></i>Price</span>
+      <span><i style="background:#ffb648"></i>SMA20</span>
+      <span><i style="background:#9b6cff"></i>SMA50</span>
+    </div>
+  </div>`;
 }
 
 function dualChart(equity, benchmark) {

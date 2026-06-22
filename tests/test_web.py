@@ -40,6 +40,8 @@ def test_analyze_demo_returns_valid_signals(client):
         assert 0 <= res["confidence"] <= 100
         assert set(res["factors"]) >= {"trend", "momentum", "participation", "quality"}
         assert res["narrative"]
+        assert isinstance(res["history"], list) and len(res["history"]) > 1
+        assert {"t", "c", "s20", "s50"} <= set(res["history"][0])
 
 
 def test_analyze_defaults_to_five_tickers(client):
