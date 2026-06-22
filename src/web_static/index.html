@@ -36,6 +36,15 @@
       </select>
     </div>
     <div class="field">
+      <label>Interval</label>
+      <select id="interval">
+        <option value="1d" selected>Daily</option>
+        <option value="1h">1 hour</option>
+        <option value="15m">15 min</option>
+        <option value="5m">5 min</option>
+      </select>
+    </div>
+    <div class="field">
       <label>Portfolio ($)</label>
       <input id="portfolio" type="number" value="10000" min="100" step="100" />
     </div>
@@ -46,8 +55,16 @@
         <span class="slider"></span>
       </label>
     </div>
+    <div class="field switch-field">
+      <label>Auto-refresh</label>
+      <label class="switch">
+        <input id="auto" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
     <div class="actions">
       <button id="analyze" class="btn primary">Analyze</button>
+      <button id="refresh" class="btn ghost" title="Reload with fresh data">↻ Refresh</button>
       <button id="run-portfolio" class="btn ghost">Portfolio Backtest</button>
     </div>
   </section>

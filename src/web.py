@@ -78,10 +78,39 @@ def _period_to_days(period: str) -> int:
     return 504
 
 
-def _demo_frame(ticker: str, period: str) -> pd.DataFrame:
+# Allowed candle intervals and the look-back window each one uses for live data.
+# Intraday windows respect Yahoo Finance limits (e.g. 15m only spans ~60 days).
+ALLOWED_INTERVALS = ("1d", "1h", "15m", "5m")
+INTRADAY_PERIOD = {"1h": "180d", "15m": "60d", "5m": "30d"}
+INTERVAL_FREQ = {"1d": "B", "1h": "60min", "15m": "15min", "5m": "5min"}
+
+
+def _clean_interval(value: Any) -> str:
+    """Validate a requested candle interval, defaulting to daily."""
+    iv = str(value or "1d").strip().lower()
+    return iv if iv in ALLOWED_INTERVALS else "1d"
+
+
+def _resolve_period_interval(period: str, interval: str) -> tuple[str, str]:
+    """Pick an effective ``(period, interval)`` pair respecting intraday limits."""
+    interval = _clean_interval(interval)
+    if interval == "1d":
+        return period, "1d"
+    return INTRADAY_PERIOD.get(interval, "60d"), interval
+
+
+def _demo_frame(ticker: str, period: str, interval: str = "1d") -> pd.DataFrame:
     """Generate deterministic synthetic OHLCV data for offline/demo use."""
-    n = max(260, _period_to_days(period))
-    seed = int(hashlib.md5(ticker.encode()).hexdigest(), 16) % (2**32)
+    if interval == "1d":
+        n = max(260, _period_to_days(period))
+        freq = "B"
+        end = pd.Timestamp.today().normalize()
+    else:
+        n = 600
+        freq = INTERVAL_FREQ.get(interval, "15min")
+        end = pd.Timestamp.now().floor("min")
+
+    seed = int(hashlib.md5(f"{ticker}:{interval}".encode()).hexdigest(), 16) % (2**32)
     rng = np.random.RandomState(seed)
 
     drift = rng.uniform(-0.0002, 0.0009)
@@ -91,7 +120,7 @@ def _demo_frame(ticker: str, period: str) -> pd.DataFrame:
     close = np.maximum(start_price * np.cumprod(1.0 + shocks), 1.0)
 
     intraday = rng.uniform(0.005, 0.02, n)
-    index = pd.date_range(end=pd.Timestamp.today().normalize(), periods=n, freq="B")
+    index = pd.date_range(end=end, periods=n, freq=freq)
     return pd.DataFrame(
         {
             "Open": np.concatenate([[close[0]], close[:-1]]),
@@ -104,9 +133,21 @@ def _demo_frame(ticker: str, period: str) -> pd.DataFrame:
     )
 
 
-def _load_frame(ticker: str, period: str, demo: bool) -> pd.DataFrame:
-    """Load (or synthesise) a price frame and attach indicators."""
-    raw = _demo_frame(ticker, period) if demo else data_loader.load_data(ticker, period=period)
+def _load_frame(
+    ticker: str,
+    period: str,
+    interval: str = "1d",
+    demo: bool = False,
+    fresh: bool = False,
+) -> pd.DataFrame:
+    """Load (or synthesise) a price frame at the chosen interval, with indicators."""
+    eff_period, eff_interval = _resolve_period_interval(period, interval)
+    if demo:
+        raw = _demo_frame(ticker, eff_period, eff_interval)
+    else:
+        raw = data_loader.load_data(
+            ticker, period=eff_period, interval=eff_interval, use_cache=not fresh
+        )
     return indicators.add_indicators(raw)
 
 
@@ -128,17 +169,20 @@ def _num_or_none(value: Any) -> float | None:
     return None if math.isnan(f) else round(f, 2)
 
 
-def _price_history(df: pd.DataFrame, max_points: int = 140) -> list[dict[str, Any]]:
+def _price_history(
+    df: pd.DataFrame, max_points: int = 140, interval: str = "1d"
+) -> list[dict[str, Any]]:
     """Down-sample close + SMA20/SMA50 for the per-card mini price chart."""
     if df is None or len(df) == 0:
         return []
+    fmt = "%Y-%m-%d" if interval == "1d" else "%m-%d %H:%M"
     step = max(1, len(df) // max_points)
     sampled = df.iloc[::step]
     out: list[dict[str, Any]] = []
     for idx, row in sampled.iterrows():
         out.append(
             {
-                "t": idx.strftime("%Y-%m-%d"),
+                "t": idx.strftime(fmt),
                 "c": _num_or_none(row.get("Close")),
                 "s20": _num_or_none(row.get("SMA_20")),
                 "s50": _num_or_none(row.get("SMA_50")),
@@ -219,15 +263,26 @@ def _signal_payload(sig: strategy.Signal, portfolio_value: float) -> dict[str, A
     }
 
 
-def _analyze_one(ticker: str, period: str, portfolio_value: float, demo: bool) -> dict[str, Any]:
+def _analyze_one(
+    ticker: str,
+    period: str,
+    portfolio_value: float,
+    demo: bool,
+    interval: str = "1d",
+    fresh: bool = False,
+) -> dict[str, Any]:
     """Analyse a single ticker, returning a JSON-ready result or an error dict."""
+    interval = _clean_interval(interval)
     try:
-        df = _load_frame(ticker, period, demo)
+        df = _load_frame(ticker, period, interval, demo, fresh)
         sig = strategy.generate_signal(df, ticker)
     except (data_loader.DataLoadError, ValueError) as exc:
         return {"ticker": ticker.upper(), "ok": False, "error": str(exc)}
     payload = _signal_payload(sig, portfolio_value)
-    payload["history"] = _price_history(df)
+    history = _price_history(df, interval=interval)
+    payload["history"] = history
+    payload["as_of"] = history[-1]["t"] if history else None
+    payload["interval"] = interval
     payload["ok"] = True
     return payload
 
@@ -252,14 +307,16 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or {}
         tickers = _parse_tickers(payload.get("tickers"))
         period = str(payload.get("period", config.DEFAULT_PERIOD))
+        interval = _clean_interval(payload.get("interval"))
         demo = bool(payload.get("demo", False))
+        fresh = bool(payload.get("fresh", False))
         try:
             portfolio_value = float(payload.get("portfolio", config.DEFAULT_PORTFOLIO_VALUE))
         except (TypeError, ValueError):
             portfolio_value = config.DEFAULT_PORTFOLIO_VALUE
 
-        results = [_analyze_one(t, period, portfolio_value, demo) for t in tickers]
-        return jsonify({"results": results, "disclaimer": DISCLAIMER})
+        results = [_analyze_one(t, period, portfolio_value, demo, interval, fresh) for t in tickers]
+        return jsonify({"results": results, "interval": interval, "disclaimer": DISCLAIMER})
 
     @app.post("/api/backtest")
     def backtest_route() -> Any:
@@ -267,14 +324,16 @@ def create_app() -> Flask:
         tickers = _parse_tickers(payload.get("tickers"))
         ticker = tickers[0]
         period = str(payload.get("period", config.DEFAULT_PERIOD))
+        interval = _clean_interval(payload.get("interval"))
         demo = bool(payload.get("demo", False))
+        fresh = bool(payload.get("fresh", False))
         try:
             capital = float(payload.get("portfolio", config.DEFAULT_PORTFOLIO_VALUE))
         except (TypeError, ValueError):
             capital = config.DEFAULT_PORTFOLIO_VALUE
 
         try:
-            df = _load_frame(ticker, period, demo)
+            df = _load_frame(ticker, period, interval, demo, fresh)
             result = backtest.run_backtest(
                 df,
                 ticker,
@@ -310,7 +369,9 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or {}
         tickers = _parse_tickers(payload.get("tickers"))
         period = str(payload.get("period", config.DEFAULT_PERIOD))
+        interval = _clean_interval(payload.get("interval"))
         demo = bool(payload.get("demo", False))
+        fresh = bool(payload.get("fresh", False))
         try:
             capital = float(payload.get("portfolio", config.DEFAULT_PORTFOLIO_VALUE))
         except (TypeError, ValueError):
@@ -320,7 +381,7 @@ def create_app() -> Flask:
         errors: dict[str, str] = {}
         for t in tickers:
             try:
-                data[t] = _load_frame(t, period, demo)
+                data[t] = _load_frame(t, period, interval, demo, fresh)
             except (data_loader.DataLoadError, ValueError) as exc:
                 errors[t] = str(exc)
 

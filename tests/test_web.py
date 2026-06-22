@@ -49,6 +49,34 @@ def test_analyze_defaults_to_five_tickers(client):
     assert len(data["results"]) == 5
 
 
+def test_analyze_intraday_demo(client):
+    data = client.post(
+        "/api/analyze", json={"tickers": ["AAPL"], "demo": True, "interval": "15m"}
+    ).get_json()
+    assert data["interval"] == "15m"
+    res = data["results"][0]
+    assert res["ok"] is True
+    assert res["interval"] == "15m"
+    assert len(res["history"]) > 1
+    assert res["as_of"]  # intraday timestamp label present
+
+
+def test_unknown_interval_defaults_to_daily(client):
+    data = client.post(
+        "/api/analyze", json={"tickers": ["AAPL"], "demo": True, "interval": "banana"}
+    ).get_json()
+    assert data["interval"] == "1d"
+    assert data["results"][0]["ok"] is True
+
+
+def test_backtest_intraday_demo(client):
+    data = client.post(
+        "/api/backtest", json={"tickers": ["NVDA"], "demo": True, "interval": "1h"}
+    ).get_json()
+    assert data["ok"] is True
+    assert data["equity_curve"]
+
+
 def test_analyze_is_deterministic_in_demo(client):
     a = client.post("/api/analyze", json={"tickers": ["NVDA"], "demo": True}).get_json()
     b = client.post("/api/analyze", json={"tickers": ["NVDA"], "demo": True}).get_json()
@@ -73,6 +101,19 @@ def test_portfolio_demo(client):
     assert data["ok"] is True
     assert data["equity_curve"] and data["benchmark_curve"]
     assert "benchmark_return" in data["metrics"]
+
+
+def test_fresh_flag_bypasses_cache(client, monkeypatch):
+    """The Refresh button (fresh=true) must request uncached data."""
+    captured = {}
+
+    def fake_load(ticker, period="2y", interval="1d", use_cache=True):
+        captured["use_cache"] = use_cache
+        raise data_loader.DataLoadError("stop after capture")
+
+    monkeypatch.setattr(web.data_loader, "load_data", fake_load)
+    client.post("/api/analyze", json={"tickers": ["AAPL"], "demo": False, "fresh": True})
+    assert captured["use_cache"] is False
 
 
 def test_analyze_handles_load_error_gracefully(client, monkeypatch):

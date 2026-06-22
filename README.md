@@ -99,14 +99,19 @@ python -m src.web
 ai-trading-bot-web --port 5000
 ```
 
-Then visit **http://127.0.0.1:5000**. Enter tickers, pick a period, and click
-**Analyze** to see signal cards (confidence ring, factor breakdown, reasons,
-risks, entry/stop levels, risk-managed sizing). Each card has a **Run backtest**
-button, and **Portfolio Backtest** simulates the whole watchlist against a
-buy-and-hold benchmark.
+Then visit **http://127.0.0.1:5000**. Enter tickers, pick a period and
+**interval** (Daily / 1h / 15m / 5m), and click **Analyze** to see signal cards
+(mini price chart, confidence ring, factor breakdown, reasons, risks, entry/stop
+levels, risk-managed sizing). Each card has a **Run backtest** button, and
+**Portfolio Backtest** simulates the whole watchlist against a buy-and-hold
+benchmark. **↻ Refresh** reloads with fresh (uncached) data, and **Auto-refresh**
+re-pulls every 60 seconds.
 
 > No internet? Flip on **Demo data** to explore the full dashboard with
 > realistic synthetic prices — completely offline.
+>
+> **Note on "live":** intraday intervals get you closer to real time, but data
+> is still **delayed end-of-bar** Yahoo Finance data (no real-time tick feed).
 
 ### ⌨️ Command line
 

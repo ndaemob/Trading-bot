@@ -17,10 +17,12 @@ function payload() {
   return {
     tickers: $("tickers").value,
     period: $("period").value,
+    interval: $("interval").value,
     portfolio: parseFloat($("portfolio").value) || 10000,
     demo: $("demo").checked,
   };
 }
+const INTERVAL_LABEL = { "1d": "daily", "1h": "1h", "15m": "15m", "5m": "5m" };
 
 async function postJSON(url, body) {
   const res = await fetch(url, {
@@ -101,7 +103,7 @@ function renderCard(r) {
   }
   return `<div class="card" data-ticker="${escapeHtml(r.ticker)}">
     <div class="card-head">
-      <div><div class="ticker">${escapeHtml(r.ticker)}</div><div class="price">Close ${num(r.latest_close)}</div></div>
+      <div><div class="ticker">${escapeHtml(r.ticker)}</div><div class="price">Close ${num(r.latest_close)}${r.as_of ? " · " + escapeHtml(r.as_of) : ""}</div></div>
       <span class="badge ${r.signal}">${r.signal}</span>
     </div>
     ${priceChart(r.history)}
@@ -188,12 +190,13 @@ function dualChart(equity, benchmark) {
 }
 
 /* --------------------------------------------------------------- actions */
-async function analyze() {
+async function analyze(opts = {}) {
   const btn = $("analyze");
   btn.disabled = true;
-  setStatus("Analysing…");
+  setStatus(opts.fresh ? "Refreshing…" : "Analysing…");
   const grid = $("results");
   const body = payload();
+  body.fresh = !!opts.fresh;
   const tickerCount = body.tickers.split(/[\s,]+/).filter(Boolean).length || 5;
   grid.innerHTML = Array.from({ length: tickerCount }, () => '<div class="skeleton"></div>').join("");
   try {
@@ -201,7 +204,11 @@ async function analyze() {
     grid.innerHTML = data.results.map(renderCard).join("");
     wireBacktestButtons();
     const ok = data.results.filter((r) => r.ok).length;
-    setStatus(`Analysed ${ok}/${data.results.length} ticker(s).` + (body.demo ? " (demo data)" : ""));
+    const iv = INTERVAL_LABEL[body.interval] || body.interval;
+    setStatus(
+      `Analysed ${ok}/${data.results.length} · ${iv} · updated ${new Date().toLocaleTimeString()}` +
+        (body.demo ? " · demo" : "")
+    );
   } catch (err) {
     grid.innerHTML = "";
     setStatus(err.message + (body.demo ? "" : " — enable Demo data to preview offline."), true);
@@ -279,7 +286,24 @@ async function runPortfolio() {
   }
 }
 
-$("analyze").addEventListener("click", analyze);
+let autoTimer = null;
+function syncPeriodState() {
+  $("period").disabled = $("interval").value !== "1d";
+}
+
+$("analyze").addEventListener("click", () => analyze());
+$("refresh").addEventListener("click", () => analyze({ fresh: true }));
 $("run-portfolio").addEventListener("click", runPortfolio);
 $("tickers").addEventListener("keydown", (e) => { if (e.key === "Enter") analyze(); });
-window.addEventListener("DOMContentLoaded", analyze);
+$("interval").addEventListener("change", () => { syncPeriodState(); analyze(); });
+$("auto").addEventListener("change", () => {
+  if ($("auto").checked) {
+    autoTimer = setInterval(() => analyze({ fresh: true }), 60000);
+  } else if (autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+});
+
+syncPeriodState();
+window.addEventListener("DOMContentLoaded", () => analyze());
