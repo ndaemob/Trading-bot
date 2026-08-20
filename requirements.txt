@@ -1,0 +1,9 @@
+# Core data + analysis stack for the AI Trading Analyst Bot.
+# Pinned to lower bounds known to work; newer versions are generally fine.
+pandas>=2.0
+numpy>=1.24
+yfinance>=0.2.40
+ta>=0.11.0
+matplotlib>=3.7
+flask>=3.0
+pytest>=7.4

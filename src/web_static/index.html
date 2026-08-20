@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Trading Analyst</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="aurora"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <div>
+        <h1>AI Trading <span>Analyst</span></h1>
+        <p class="tagline">Multi-factor signals · risk-managed sizing · backtests</p>
+      </div>
+    </div>
+    <span class="safety-pill">● ANALYSIS ONLY — NO REAL TRADES</span>
+  </header>
+
+  <section class="controls">
+    <div class="field grow">
+      <label>Tickers</label>
+      <input id="tickers" type="text" value="AAPL, MSFT, NVDA, TSLA, GOOGL"
+             placeholder="e.g. AAPL, MSFT, NVDA" />
+    </div>
+    <div class="field">
+      <label>Period</label>
+      <select id="period">
+        <option value="1y">1 year</option>
+        <option value="2y" selected>2 years</option>
+        <option value="5y">5 years</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Interval</label>
+      <select id="interval">
+        <option value="1d" selected>Daily</option>
+        <option value="1h">1 hour</option>
+        <option value="15m">15 min</option>
+        <option value="5m">5 min</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Portfolio ($)</label>
+      <input id="portfolio" type="number" value="10000" min="100" step="100" />
+    </div>
+    <div class="field switch-field">
+      <label>Demo data</label>
+      <label class="switch">
+        <input id="demo" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="field switch-field">
+      <label>Auto-refresh</label>
+      <label class="switch">
+        <input id="auto" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="analyze" class="btn primary">Analyze</button>
+      <button id="refresh" class="btn ghost" title="Reload with fresh data">↻ Refresh</button>
+      <button id="run-portfolio" class="btn ghost">Portfolio Backtest</button>
+    </div>
+  </section>
+
+  <p id="status" class="status"></p>
+
+  <section id="portfolio-panel" class="portfolio-panel hidden"></section>
+
+  <main id="results" class="grid"></main>
+
+  <footer class="footer">
+    <p>This is <strong>not financial advice</strong>. No real trades are executed.
+       Signals are probabilistic and for educational use only.</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
